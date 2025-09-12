@@ -11,7 +11,8 @@ if($data->num_rows> 0 ){
 ?>
 <h3 align="center">Below is the data of every user</h3>
 <hr>
-<table class="table">
+<div class="table-responsive">
+<table class="table table-bordered table-striped">
     <tr>
         <th>ID</th>
         <th>Name</th>
@@ -52,6 +53,7 @@ while($result = $data->fetch_assoc()){
 }
 ?>
 </table>
+</div>
 
 <?php
 require "includes/footer.php";
