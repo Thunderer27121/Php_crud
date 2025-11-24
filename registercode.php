@@ -1,23 +1,30 @@
 <?php
+// registercode.php
+// NOTE: This file uses JS redirects instead of header() as requested.
+
+// Hide deprecation notices from vendor libs (prevents stray output warnings)
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
+ini_set('display_errors', '0');
+
 session_start();
-require "connect.php"; // should set $con (mysqli connection)
+require "connect.php"; // should set $con = new mysqli(...)
 
 use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\SMTP;
 use PHPMailer\PHPMailer\Exception;
 
 require 'vendor/autoload.php';
 
 /**
  * sendemail($name, $email, $verify_token)
- * - keeps your PHPMailer->Brevo API composer function
- * - returns ['ok'=>bool,'status'=>int,'body'=>string]
+ * - Compose with PHPMailer and send via Brevo HTTP API
+ * - Returns ['ok'=>bool, 'status'=>int, 'body'=>string]
  */
 function sendemail($name, $email, $verify_token)
 {
-    $brevoApiKey   = getenv('brevo_apikey');      // check your env var names
-    $fromEmail     = getenv('bbrevo_email');
-    $fromName      = getenv('brevo_name');
+    // env var names (match what you have in Render)
+    $brevoApiKey   = getenv('brevo_apikey');    // example: xkeysib-...
+    $fromEmail     = getenv('bbrevo_email');    // verified sender email
+    $fromName      = getenv('brevo_name');      // sender name
 
     if (!$brevoApiKey || !$fromEmail) {
         return ['ok' => false, 'status' => 0, 'body' => 'Missing BREVO_API_KEY or BREVO_FROM_EMAIL'];
@@ -25,11 +32,12 @@ function sendemail($name, $email, $verify_token)
 
     $verifyUrl = "https://php-crud-sflf.onrender.com/verify_email.php?token=" . urlencode($verify_token);
 
+    // Compose email with PHPMailer (only to build HTML and plain text body)
     $mail = new PHPMailer(true);
     try {
         $mail->setFrom($fromEmail, $fromName ?: '');
         $mail->addAddress($email, $name);
-        $mail->Subject = 'email verification from platform';
+        $mail->Subject = 'Email verification from platform';
         $mail->isHTML(true);
 
         $htmlBody = "<h2>You have registered with platform</h2>
@@ -43,6 +51,7 @@ function sendemail($name, $email, $verify_token)
         return ['ok' => false, 'status' => 0, 'body' => 'PHPMailer compose error: ' . $e->getMessage()];
     }
 
+    // Build payload for Brevo API
     $payload = [
         "sender" => ["email" => $fromEmail, "name" => $fromName ?: ''],
         "to" => [
@@ -90,21 +99,21 @@ if (isset($_POST['submit'])) {
     // 1) Required fields check (ALL required)
     if ($name === '' || $phone === '' || $email === '' || $password === '' || $cpass === '') {
         $_SESSION['status'] = "All fields are mandatory";
-        header("Location: register.php");
+        echo "<script>window.location.href = 'register.php';</script>";
         exit;
     }
 
     // 2) Password match
     if ($password !== $cpass) {
         $_SESSION['status'] = "Password and Confirm Password should contain same value";
-        header("Location: register.php");
+        echo "<script>window.location.href = 'register.php';</script>";
         exit;
     }
 
     // 3) Validate email
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $_SESSION['status'] = "Invalid email address";
-        header("Location: register.php");
+        echo "<script>window.location.href = 'register.php';</script>";
         exit;
     }
 
@@ -117,7 +126,7 @@ if (isset($_POST['submit'])) {
         if ($stmt->num_rows > 0) {
             $stmt->close();
             $_SESSION['status'] = "Email already exists";
-            header("Location: register.php");
+            echo "<script>window.location.href = 'register.php';</script>";
             exit;
         }
         $stmt->close();
@@ -125,24 +134,24 @@ if (isset($_POST['submit'])) {
         // DB prepare failed
         error_log("DB prepare failed (check): " . $con->error);
         $_SESSION['status'] = "Server error (try again later)";
-        header("Location: register.php");
+        echo "<script>window.location.href = 'register.php';</script>";
         exit;
     }
 
-    // 5) All good — insert user
+    // 5) All good — insert user (using verify_status column, no email_sent)
     $verify_token = bin2hex(random_bytes(16)); // secure token
     $hashed_pass = password_hash($password, PASSWORD_DEFAULT);
 
+    // Insert includes verify_status (0)
     $insertSql = "INSERT INTO users (name, phone, email, password, verify_token, verify_status, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())";
     if ($ins = $con->prepare($insertSql)) {
         $ins->bind_param('sssss', $name, $phone, $email, $hashed_pass, $verify_token);
         $executed = $ins->execute();
         if (!$executed) {
-            // insert failed
             error_log("DB insert failed: " . $ins->error);
             $ins->close();
             $_SESSION['status'] = "Registration failed (server error)";
-            header("Location: register.php");
+            echo "<script>window.location.href = 'register.php';</script>";
             exit;
         }
         $userId = $ins->insert_id;
@@ -150,7 +159,7 @@ if (isset($_POST['submit'])) {
     } else {
         error_log("DB prepare failed (insert): " . $con->error);
         $_SESSION['status'] = "Server error (try again later)";
-        header("Location: register.php");
+        echo "<script>window.location.href = 'register.php';</script>";
         exit;
     }
 
@@ -158,29 +167,23 @@ if (isset($_POST['submit'])) {
     $res = sendemail($name, $email, $verify_token);
 
     if (is_array($res) && $res['ok']) {
-        // mark email_sent = 1
-        $updSql = "UPDATE users SET email_sent = 1 WHERE id = ?";
-        if ($upd = $con->prepare($updSql)) {
-            $upd->bind_param('i', $userId);
-            $upd->execute();
-            $upd->close();
-        }
+        // Email accepted by provider; user remains with verify_status = 0 until they click verify link.
         $_SESSION['status'] = "Registration successful. Verification email sent — check your inbox (and spam).";
-        header("Location: register.php");
+        echo "<script>window.location.href = 'register.php';</script>";
         exit;
     } else {
-        // email failed: log details, keep user in DB so you can resend
+        // email failed: log details, keep user in DB so you can resend later
         $logEntry = date('c') . " | user_id:$userId | mail_status:" . ($res['status'] ?? '0') . " | body: " . substr($res['body'] ?? '', 0, 1000) . PHP_EOL;
         @file_put_contents(__DIR__ . '/email_send_fail.log', $logEntry, FILE_APPEND | LOCK_EX);
         error_log("Email sending failed for user_id $userId: " . json_encode($res));
 
-        // Inform user but don't delete the account; allow resend from UI
+        // Inform user but keep account; user can request "resend verification" from UI
         $_SESSION['status'] = "Registration saved, but verification email failed to send. Click 'Resend verification' or contact support.";
-        header("Location: register.php");
+        echo "<script>window.location.href = 'register.php';</script>";
         exit;
     }
 } // end if submit
 
-// If script reaches here without POST submit, just redirect to register
-header("Location: register.php");
+// If script reaches here without POST submit, redirect to register page using JS
+echo "<script>window.location.href = 'register.php';</script>";
 exit;
