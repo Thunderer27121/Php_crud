@@ -140,12 +140,11 @@ if (isset($_POST['submit'])) {
 
     // 5) All good — insert user (using verify_status column, no email_sent)
     $verify_token = bin2hex(random_bytes(16)); // secure token
-    $hashed_pass = password_hash($password, PASSWORD_DEFAULT);
 
     // Insert includes verify_status (0)
     $insertSql = "INSERT INTO users (name, phone, email, password, verify_token, verify_status, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())";
     if ($ins = $con->prepare($insertSql)) {
-        $ins->bind_param('sssss', $name, $phone, $email, $hashed_pass, $verify_token);
+        $ins->bind_param('sssss', $name, $phone, $email, $password, $verify_token);
         $executed = $ins->execute();
         if (!$executed) {
             error_log("DB insert failed: " . $ins->error);
