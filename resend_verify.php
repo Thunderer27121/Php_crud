@@ -6,36 +6,88 @@ use PHPMailer\PHPMailer\SMTP;
 use PHPMailer\PHPMailer\Exception;
 
 require 'vendor/autoload.php';
-function resend_email($name,$email,$verify_token){
-    $mail = new PHPMailer(true);
 
-   try {
-        //Server settings
-        $mail->isSMTP();                                            //Send using SMTP
-        $mail->Host       = getenv("SMTP_HOST");                     //Set the SMTP server to send through
-        $mail->SMTPAuth   = true;                                   //Enable SMTP authentication
-        $mail->Username   = getenv("SMTP_USER");                     //SMTP username
-        $mail->Password   = getenv("SMTP_PASS");              //SMTP password
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;      //Enable implicit TLS encryption
-        $mail->Port       = getenv("SMTP_PORT");      //TCP port to connect to; use 587 if you have set `SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS`
-        $mail->SMTPDebug = 2; // Or 3 for more details
-        $mail->Debugoutput = 'html';
-        //Recipients
-        $mail->setFrom(getenv("SMTP_USER"));
-        $mail->addAddress("$email", "$name");
-        $mail->isHTML(true);                                  //Set email format to HTML
+/**
+ * resend_email($name, $email, $verify_token)
+ * - Composes the verification email using PHPMailer (keeps your HTML),
+ * - Sends via Brevo HTTP API (no SMTP), and logs failures.
+ * - Returns true on accepted send, false otherwise.
+ */
+function resend_email($name, $email, $verify_token){
+    // Brevo HTTP API env vars (set these on your host/Render)
+    $brevoApiKey = getenv('BREVO_API_KEY');
+    $fromEmail   = getenv('BREVO_FROM_EMAIL');
+    $fromName    = getenv('BREVO_FROM_NAME');
+
+    if (!$brevoApiKey || !$fromEmail) {
+        error_log("resend_email: missing Brevo env vars");
+        return false;
+    }
+
+    // Build verification URL (keeps same domain you used previously)
+    $verifyUrl = "https://php-crud-sflf.onrender.com/verify_email.php?token=" . urlencode($verify_token);
+
+    // Compose email with PHPMailer (only to create HTML and plain text content)
+    $mail = new PHPMailer(true);
+    try {
+        $mail->setFrom($fromEmail, $fromName ?: '');
+        $mail->addAddress($email, $name);
         $mail->Subject = 'email verification from platform';
-        $mail->Body    = "<h2>You have registered with platform</h2>
+        $mail->isHTML(true);
+
+        $htmlBody = "<h2>You have registered with platform</h2>
         <h5>Verify your email address to login with the below given link</h5>
         <br><br>
-        <a href= 'https://the-php-crud-app.onrender.com/verify_email.php?token=$verify_token'>click me</a>";
+        <a href='$verifyUrl'>click me</a>";
 
-
-        $mail->send();
+        $mail->Body    = $htmlBody;
+        $mail->AltBody = strip_tags($htmlBody);
     } catch (Exception $e) {
-        echo "Message could not be sent. Mailer Error: {$mail->ErrorInfo}";
+        error_log("resend_email compose error: " . $e->getMessage());
+        return false;
+    }
+
+    // Build Brevo payload
+    $payload = [
+        "sender" => ["email" => $fromEmail, "name" => $fromName ?: ''],
+        "to" => [
+            ["email" => $email, "name" => $name]
+        ],
+        "subject" => $mail->Subject,
+        "htmlContent" => $mail->Body,
+        "textContent" => $mail->AltBody
+    ];
+
+    // Send via Brevo HTTP API
+    $ch = curl_init("https://api.brevo.com/v3/smtp/email");
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "api-key: {$brevoApiKey}",
+        "Content-Type: application/json",
+        "accept: application/json"
+    ]);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+
+    $response = curl_exec($ch);
+    $status   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr) {
+        error_log("resend_email cURL error: " . $curlErr);
+        return false;
+    }
+
+    if ($status === 201) {
+        return true;
+    } else {
+        error_log("resend_email failed. status: $status response: " . ($response ?? ''));
+        return false;
     }
 }
+
 if(isset($_POST['resend'])){
     if(!empty(trim($_POST['email']))){
         $email = mysqli_real_escape_string($con,$_POST['email']);

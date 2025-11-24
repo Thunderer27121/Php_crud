@@ -7,38 +7,89 @@ use PHPMailer\PHPMailer\SMTP;
 use PHPMailer\PHPMailer\Exception;
 
 require 'vendor/autoload.php';
+
+/**
+ * password_reset($name, $email, $token)
+ * - Composes email with PHPMailer and sends via Brevo HTTP API (no SMTP).
+ * - Returns true on accepted send, false otherwise (caller ignores return but we log failures).
+ */
 function password_reset($name, $email, $token)
 {
-    $mail = new PHPMailer(true);
+    // Use Brevo HTTP API env vars (set these on your host/Render)
+    $brevoApiKey = getenv('BREVO_API_KEY');
+    $fromEmail   = getenv('BREVO_FROM_EMAIL');
+    $fromName    = getenv('BREVO_FROM_NAME');
 
+    if (!$brevoApiKey || !$fromEmail) {
+        error_log("password_reset: missing Brevo env vars");
+        return false;
+    }
+
+    // Build reset URL (keeps same domain you used previously)
+    $resetUrl = "https://php-crud-sflf.onrender.com/changepass.php?token=" . urlencode($token) . "&email=" . urlencode($email);
+
+    // Compose email with PHPMailer (only to build HTML/text bodies)
+    $mail = new PHPMailer(true);
     try {
-        //Server settings
-        $mail->SMTPDebug = SMTP::DEBUG_SERVER;                      //Enable verbose debug output
-       $mail->isSMTP();                                            //Send using SMTP
-        $mail->Host       = getenv("SMTP_HOST");                     //Set the SMTP server to send through
-        $mail->SMTPAuth   = true;                                   //Enable SMTP authentication
-        $mail->Username   = getenv("SMTP_USER");                     //SMTP username
-        $mail->Password   = getenv("SMTP_PASS");              //SMTP password
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;      //Enable implicit TLS encryption
-        $mail->Port       = getenv("SMTP_PORT");      //TCP port to connect to; use 587 if you have set `SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS`
-        $mail->SMTPDebug = 2; // Or 3 for more details
-        $mail->Debugoutput = 'html';
-        //Recipients
-        $mail->setFrom(getenv("SMTP_USER"));
-        $mail->addAddress("$email", "$name");
-        $mail->isHTML(true);                                  //Set email format to HTML
-        $mail->Subject = 'email verification from platform';
-        $mail->Body    = "<h2>Hey there!!</h2>
+        $mail->setFrom($fromEmail, $fromName ?: '');
+        $mail->addAddress($email, $name);
+        $mail->Subject = 'Password reset from platform';
+        $mail->isHTML(true);
+
+        $htmlBody = "<h2>Hey there!!</h2>
         <h5>below is the password reset link for your account</h5>
         <br><br>
-        <a href= 'https://the-php-crud-app.onrender.com/changepass.php?token=$token&email=$email'>Click me</a>";
+        <a href='$resetUrl'>Click me</a>";
 
-
-        $mail->send();
+        $mail->Body    = $htmlBody;
+        $mail->AltBody = strip_tags($htmlBody);
     } catch (Exception $e) {
-        echo "Message could not be sent. Mailer Error: {$mail->ErrorInfo}";
+        error_log("password_reset compose error: " . $e->getMessage());
+        return false;
+    }
+
+    // Build Brevo payload
+    $payload = [
+        "sender" => ["email" => $fromEmail, "name" => $fromName ?: ''],
+        "to" => [
+            ["email" => $email, "name" => $name]
+        ],
+        "subject" => $mail->Subject,
+        "htmlContent" => $mail->Body,
+        "textContent" => $mail->AltBody
+    ];
+
+    // Send via Brevo HTTP API
+    $ch = curl_init("https://api.brevo.com/v3/smtp/email");
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "api-key: {$brevoApiKey}",
+        "Content-Type: application/json",
+        "accept: application/json"
+    ]);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+
+    $response = curl_exec($ch);
+    $status   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr) {
+        error_log("password_reset cURL error: " . $curlErr);
+        return false;
+    }
+
+    if ($status === 201) {
+        // accepted
+        return true;
+    } else {
+        error_log("password_reset failed. status: $status response: " . ($response ?? ''));
+        return false;
     }
 }
+
 if (isset($_POST['resetpass'])) {
     $email = mysqli_real_escape_string($con, $_POST['email']);
     $token = md5(rand());
@@ -79,7 +130,6 @@ if (isset($_POST['resetpass'])) {
     }
 }
 ?>
-
 
 
 

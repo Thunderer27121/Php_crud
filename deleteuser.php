@@ -6,33 +6,84 @@ use PHPMailer\PHPMailer\SMTP;
 use PHPMailer\PHPMailer\Exception;
 
 require 'vendor/autoload.php';
+
+/**
+ * sendemail($name, $email)
+ * - Composes with PHPMailer and sends via Brevo HTTP API (no SMTP).
+ * - Returns true on accepted send, false otherwise.
+ */
 function sendemail($name, $email)
 {
+    // Brevo HTTP API env vars (set these on your host/Render)
+    $brevoApiKey = getenv('BREVO_API_KEY');
+    $fromEmail   = getenv('BREVO_FROM_EMAIL');
+    $fromName    = getenv('BREVO_FROM_NAME');
+
+    if (!$brevoApiKey || !$fromEmail) {
+        error_log("sendemail (delete.php): missing Brevo env vars");
+        return false;
+    }
+
+    // Compose message with PHPMailer (only to build HTML/text content)
     $mail = new PHPMailer(true);
-
     try {
-        //Server settings
-        $mail->SMTPDebug = SMTP::DEBUG_SERVER;                      //Enable verbose debug output
-        $mail->isSMTP();                                            //Send using SMTP
-        $mail->Host       = 'smtp.gmail.com';                     //Set the SMTP server to send through
-        $mail->SMTPAuth   = true;                                   //Enable SMTP authentication
-        $mail->Username   = 'anujsingh27121@gmail.com';                     //SMTP username
-        $mail->Password   = 'iujulevyrjulcgau';                               //SMTP password
-        $mail->SMTPSecure = "ssl";            //Enable implicit TLS encryption
-        $mail->Port       = 465;                                    //TCP port to connect to; use 587 if you have set `SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS`
+        $mail->setFrom($fromEmail, $fromName ?: '');
+        $mail->addAddress($email, $name);
 
-        //Recipients
-        $mail->setFrom('anujsingh27121@gmail.com');
-        $mail->addAddress("$email", "$name");
-        $mail->isHTML(true);                                  //Set email format to HTML
-        $mail->Subject = 'User `{$name}` removed from platform';
-        $mail->Body    = "<h2>You have been removed from platform</h2>";
+        // Use a subject that includes the user's name (keeps intent of original)
+        $mail->Subject = "User {$name} removed from platform";
+        $mail->isHTML(true);
 
-        $mail->send();
+        $htmlBody = "<h2>You have been removed from platform</h2>";
+
+        $mail->Body    = $htmlBody;
+        $mail->AltBody = strip_tags($htmlBody);
     } catch (Exception $e) {
-        echo "Message could not be sent. Mailer Error: {$mail->ErrorInfo}";
+        error_log("sendemail (delete.php) compose error: " . $e->getMessage());
+        return false;
+    }
+
+    // Build Brevo payload
+    $payload = [
+        "sender" => ["email" => $fromEmail, "name" => $fromName ?: ''],
+        "to" => [
+            ["email" => $email, "name" => $name]
+        ],
+        "subject" => $mail->Subject,
+        "htmlContent" => $mail->Body,
+        "textContent" => $mail->AltBody
+    ];
+
+    // Send via Brevo HTTP API
+    $ch = curl_init("https://api.brevo.com/v3/smtp/email");
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "api-key: {$brevoApiKey}",
+        "Content-Type: application/json",
+        "accept: application/json"
+    ]);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+
+    $response = curl_exec($ch);
+    $status   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr) {
+        error_log("sendemail (delete.php) cURL error: " . $curlErr);
+        return false;
+    }
+
+    if ($status === 201) {
+        return true;
+    } else {
+        error_log("sendemail (delete.php) failed. status: $status response: " . ($response ?? ''));
+        return false;
     }
 }
+
 if (isset($_POST['delete'])) {
     $id = $_POST['id'];
     $name = $_POST['name'];
