@@ -92,12 +92,15 @@ if (isset($_POST['delete'])) {
     $sql->bind_param("i", $id);
     $sql->execute();
     if ($sql->affected_rows > 0) {
+        if(sendemail($name, $email)){
         echo "<script>
                window.alert('User data deleted');
                window.location.href = 'userdata.php';
               </script>
        ";
-        sendemail($name, $email);
+        }else{
+            error_log("there was an error in sending the delete information through email");
+        }
     } else {
         echo "<script>
                window.alert('failed to delete data');
