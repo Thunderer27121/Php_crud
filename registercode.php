@@ -133,7 +133,7 @@ if (isset($_POST['submit'])) {
     $verify_token = bin2hex(random_bytes(16)); // secure token
     $hashed_pass = password_hash($password, PASSWORD_DEFAULT);
 
-    $insertSql = "INSERT INTO users (name, phone, email, password, verify_token, is_verified, email_sent, created_at) VALUES (?, ?, ?, ?, ?, 0, 0, NOW())";
+    $insertSql = "INSERT INTO users (name, phone, email, password, verify_token, verify_status, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())";
     if ($ins = $con->prepare($insertSql)) {
         $ins->bind_param('sssss', $name, $phone, $email, $hashed_pass, $verify_token);
         $executed = $ins->execute();
