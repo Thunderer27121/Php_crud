@@ -23,7 +23,7 @@ function sendemail($name, $email, $verify_token)
 {
     // env var names (match what you have in Render)
     $brevoApiKey   = getenv('brevo_apikey');    // example: xkeysib-...
-    $fromEmail     = getenv('bbrevo_email');    // verified sender email
+    $fromEmail     = getenv('brevo_email');    // verified sender email
     $fromName      = getenv('brevo_name');      // sender name
 
     if (!$brevoApiKey || !$fromEmail) {
