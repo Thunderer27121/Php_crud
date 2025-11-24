@@ -15,9 +15,9 @@ require 'vendor/autoload.php';
  */
 function resend_email($name, $email, $verify_token){
     // Brevo HTTP API env vars (set these on your host/Render)
-    $brevoApiKey = getenv('BREVO_API_KEY');
-    $fromEmail   = getenv('BREVO_FROM_EMAIL');
-    $fromName    = getenv('BREVO_FROM_NAME');
+    $brevoApiKey   = getenv('brevo_apikey');    // example: xkeysib-...
+    $fromEmail     = getenv('brevo_email');    // verified sender email
+    $fromName      = getenv('brevo_name');   
 
     if (!$brevoApiKey || !$fromEmail) {
         error_log("resend_email: missing Brevo env vars");

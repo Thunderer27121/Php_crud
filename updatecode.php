@@ -1,4 +1,5 @@
 <?php
+session_start();
 require 'connect.php';
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
@@ -15,9 +16,9 @@ function sendemail($name, $email, $verify_token)
     // Use the Brevo HTTP API key and sender details from environment.
     // Make sure these env vars are set on your server/Render:
     // BREVO_API_KEY, BREVO_FROM_EMAIL, BREVO_FROM_NAME
-    $brevoApiKey = getenv('BREVO_API_KEY');
-    $fromEmail   = getenv('BREVO_FROM_EMAIL');
-    $fromName    = getenv('BREVO_FROM_NAME');
+    $brevoApiKey   = getenv('brevo_apikey');    // example: xkeysib-...
+    $fromEmail     = getenv('brevo_email');    // verified sender email
+    $fromName      = getenv('brevo_name');   
 
     if (!$brevoApiKey || !$fromEmail) {
         // don't break your existing flow — log and return false-ish

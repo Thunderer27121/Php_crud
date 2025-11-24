@@ -16,9 +16,9 @@ require 'vendor/autoload.php';
 function password_reset($name, $email, $token)
 {
     // Use Brevo HTTP API env vars (set these on your host/Render)
-    $brevoApiKey = getenv('BREVO_API_KEY');
-    $fromEmail   = getenv('BREVO_FROM_EMAIL');
-    $fromName    = getenv('BREVO_FROM_NAME');
+   $brevoApiKey   = getenv('brevo_apikey');    // example: xkeysib-...
+    $fromEmail     = getenv('brevo_email');    // verified sender email
+    $fromName      = getenv('brevo_name');   
 
     if (!$brevoApiKey || !$fromEmail) {
         error_log("password_reset: missing Brevo env vars");
